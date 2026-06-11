@@ -188,12 +188,12 @@ RESUME_FROM = "./models/round_1/sac_bipedalwalker_500000_steps.zip"
 | `LEARNING_RATE` | 3e-4 (Round 1/2) / **1e-4 (Round 3+)** | SAC 学习率 |
 | `BATCH_SIZE` | 256 | 每次梯度更新的样本数 |
 | `BUFFER_SIZE` | 1,000,000 | 经验回放池容量 |
-| `NET_ARCH` | [256, 256] (Round 1/2) / **[512, 512] (Round 3+)** | Actor/Critic 隐藏层结构 |
+| `NET_ARCH` | [256, 256] | Actor/Critic 隐藏层结构 |
 | `EVAL_FREQ` | 50,000 | 评估频率（步数） |
 | `CHECKPOINT_FREQ` | 100,000 | 检查点保存频率 |
 | `ROUND_ID` | 1 | 轮次编号（自动创建独立目录） |
 | `RESUME_FROM` | None | 预训练模型路径 |
-| `ENT_COEF` | "auto" (Round 1/2) / **0.1 (Round 3+)** | 探索程度：自动调整或固定值 |
+| `ENT_COEF` | "auto" (所有轮次) | 探索程度：自动调整 |
 | `STALL_PENALTY` | 1.0 (Round 2) / **3.0 (Round 3+)** | 不动惩罚强度 |
 | `FORWARD_WEIGHT` | 2.0 (Round 2) / **5.0 (Round 3+)** | 前进速度奖励权重 |
 | `STALL_THRESHOLD` | 0.05 (Round 2) / **0.15 (Round 3+)** | 判定为卡住的水平速度阈值 |
@@ -240,7 +240,7 @@ ENABLE_EARLY_TERMINATION = True   # 是否提前终止
 |------|----------|--------|----------|---------------|----------------|-----------------|------|
 | Round 1 | [256, 256] | 3e-4 | "auto" | ❌ 未启用 | ❌ 未启用 | — | 陷入局部最优，半蹲不动 |
 | Round 2 | [256, 256] | 3e-4 | "auto" | 1.0 | 2.0 | 0.05 | 🎉 学会行走，奖励 +527.78 |
-| Round 3 | **[512, 512]** | **1e-4** | **0.1** | **3.0** | **5.0** | **0.15** | ⏳ 目标：消除小碎步，走得更快更稳 |
+| Round 3 | [256, 256] | **1e-4** | "auto" | **3.0** | **5.0** | **0.15** | ⏳ 目标：消除小碎步，走得更快更稳 |
 
 ### 独立测试
 

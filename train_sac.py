@@ -35,18 +35,19 @@ RENDER_MODE = None  # 训练时不渲染，设为 "rgb_array" 可录制
 
 # 训练参数
 TOTAL_TIMESTEPS = 10_000_000  # 本轮要训练的总步数
-LEARNING_RATE = 1e-4          # Round 3: 降低学习率，精细优化已有策略
+LEARNING_RATE = 3e-4          # Round 4: 恢复 Round 2 的学习率，验证 1e-4 是否为退化主因
 BATCH_SIZE = 256
 BUFFER_SIZE = 1_000_000
 TAU = 0.005
 GAMMA = 0.99
-ENT_COEF = 0.1                # Round 3: 固定中等探索，维持策略多样性
+ENT_COEF = "auto"  # 自动调整温度系数 alpha
+# 注意: 加载已保存模型时，不要改为固定值，会导致 SB3 内部属性冲突
 
 # 网络结构
-NET_ARCH = [512, 512]         # Round 3: 增大网络容量，增强地形泛化
+NET_ARCH = [256, 256]         # 保持与 Round 2 兼容，加载已有模型
 
 # 日志与保存
-ROUND_ID = 3                  # 轮次编号，每轮递增，自动创建独立目录
+ROUND_ID = 4                  # 轮次编号，每轮递增，自动创建独立目录
 CHECKPOINT_FREQ = 100_000
 EVAL_FREQ = 50_000
 EVAL_EPISODES = 2
@@ -56,6 +57,7 @@ EVAL_EPISODES = 2
 # 模式 A: 完全从头 —— 保持 None
 # 模式 B: 加载预训练当新轮次起点 —— 填上一轮模型路径
 # 模式 C: 继续训练 —— 填当前轮检查点路径
+# Round 4: 回退到 Round 2 的 50万步黄金检查点 (+527.78)
 RESUME_FROM = "./models/round_2/sac_bipedalwalker_500000_steps.zip"
 # -------------------------------------------------
 
@@ -64,13 +66,13 @@ RESUME_FROM = "./models/round_2/sac_bipedalwalker_500000_steps.zip"
 USE_REWARD_SHAPING = True
 
 # 奖励塑形参数 (仅在 USE_REWARD_SHAPING=True 时生效)
-# Round 3 增强塑形：更强的不动惩罚 + 更大的前进奖励，彻底消除小碎步
-FORWARD_WEIGHT = 5.0        # Round 3: 从 2.0 → 5.0，大步前进更有利可图
+# Round 4: 保留 Round 3 增强塑形，只改学习率做控制变量实验
+FORWARD_WEIGHT = 5.0        # 从 2.0 → 5.0，大步前进更有利可图
 UPRIGHT_WEIGHT = 0.5        # 站立姿态奖励权重
-STALL_PENALTY = 3.0         # Round 3: 从 1.0 → 3.0，卡住惩罚更重
+STALL_PENALTY = 3.0         # 从 1.0 → 3.0，卡住惩罚更重
 SMOOTH_WEIGHT = 0.1         # 动作平滑权重
 ENABLE_EARLY_TERMINATION = True   # 卡住时是否提前终止 episode
-STALL_THRESHOLD = 0.15      # Round 3: 从 0.05 → 0.15，小碎步也会被判定为卡住
+STALL_THRESHOLD = 0.15      # 从 0.05 → 0.15，小碎步也会被判定为卡住
 MAX_STALL_STEPS = 100       # 允许连续卡住的最大步数
 
 # 注意：render=True 会弹出 pygame 窗口显示机器人走路，但会拖慢训练速度。
@@ -276,6 +278,7 @@ def load_or_create_model(train_env, resume_path=None):
     """
     if resume_path and os.path.exists(resume_path):
         print(f"\n[加载模型] 从 {resume_path} 加载...")
+        # 加载时不传 ent_coef，避免与保存模型的结构冲突
         model = SAC.load(
             resume_path,
             env=train_env,
@@ -284,11 +287,22 @@ def load_or_create_model(train_env, resume_path=None):
             batch_size=BATCH_SIZE,
             tau=TAU,
             gamma=GAMMA,
-            ent_coef=ENT_COEF,
             tensorboard_log=LOG_DIR,
             verbose=1,
             device=device,
         )
+        # 加载后手动覆盖 ent_coef（如果配置为固定值）
+        # 注意: 由于 SB3 内部机制限制，加载 "auto" 模型后不建议改为固定值
+        # 如需固定 ent_coef，请创建新模型而非加载旧模型
+        if ENT_COEF != "auto" and hasattr(model, 'ent_coef'):
+            import torch as th
+            # 仅当原始模型也是固定值时才允许覆盖
+            if not hasattr(model, 'log_ent_coef'):
+                model.ent_coef = th.tensor([float(ENT_COEF)], device=model.device)
+                print(f"[加载模型] ent_coef 已手动设置为 {ENT_COEF}")
+            else:
+                print(f"[警告] 原始模型使用 ent_coef='auto'，忽略配置中的固定值，保持自动调整")
+        print("[加载模型] 成功！")
         print("[加载模型] 成功！")
         return model, True
     else:
