@@ -1,0 +1,9 @@
+torch>=2.0.0
+torchvision
+torchaudio
+gymnasium>=1.0.0
+stable-baselines3>=2.0.0
+tensorboard
+matplotlib
+numpy
+box2d-py
