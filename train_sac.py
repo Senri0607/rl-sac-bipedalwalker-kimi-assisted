@@ -35,48 +35,43 @@ RENDER_MODE = None  # 训练时不渲染，设为 "rgb_array" 可录制
 
 # 训练参数
 TOTAL_TIMESTEPS = 10_000_000  # 本轮要训练的总步数
-LEARNING_RATE = 3e-4          # Round 6: 保持成功学习率
+LEARNING_RATE = 3e-4          # Round 7: 保持成功学习率
 BATCH_SIZE = 256
 BUFFER_SIZE = 1_000_000
 TAU = 0.005
 GAMMA = 0.99
 ENT_COEF = "auto"  # 自动调整温度系数 alpha
-# 注意: 加载已保存模型时，不要改为固定值，会导致 SB3 内部属性冲突
 
 # 网络结构
-NET_ARCH = [256, 256]         # 保持与 Round 5 兼容，加载已有模型
+NET_ARCH = [256, 256]         # 保持与 Round 6 兼容
 
 # 日志与保存
-ROUND_ID = 6                  # 轮次编号，每轮递增，自动创建独立目录
+ROUND_ID = 7                  # 轮次编号，每轮递增，自动创建独立目录
 CHECKPOINT_FREQ = 100_000
 EVAL_FREQ = 50_000
 EVAL_EPISODES = 2
 
 # 多轮训练控制 (三选一)
 # -------------------------------------------------
-# 模式 A: 完全从头 —— 保持 None
-# 模式 B: 加载预训练当新轮次起点 —— 填上一轮模型路径
-# 模式 C: 继续训练 —— 填当前轮检查点路径
-# Round 6: 重新尝试 —— 修正 obs 维度，从零开始训练，不加载旧模型
-# 旧模型在错误维度上训练成功，无法适应新维度
-RESUME_FROM = None
+# Round 7: 从 Round 6 的 10万步检查点继续，修正 LIFT/STRIDE 为条件奖励
+# 奖励函数变化可以加载旧模型，因为只是环境信号变了，模型权重不变
+RESUME_FROM = "./models/round_6/sac_bipedalwalker_100000_steps.zip"
 # -------------------------------------------------
 
 # 奖励塑形 —— 解决机器人"卡住不动"的局部最优问题
-# 启用后会额外奖励前进、惩罚不动，强烈建议困难版开启
 USE_REWARD_SHAPING = True
 
 # 奖励塑形参数 (仅在 USE_REWARD_SHAPING=True 时生效)
-# Round 6: 温和增强塑形，修正 obs 维度，增加步态奖励
-FORWARD_WEIGHT = 2.5        # ✅ 从 2.0 → 2.5，温和增加大步前进奖励
-UPRIGHT_WEIGHT = 0.5        # 站立姿态奖励权重
-STALL_PENALTY = 1.0         # 保持 Round 5 成功值
-SMOOTH_WEIGHT = 0.1         # 动作平滑权重
-LIFT_WEIGHT = 0.1           # ⭐ 新增：抬腿跨步奖励权重，鼓励跨越障碍
-STRIDE_WEIGHT = 0.05        # ⭐ 新增：空中步态奖励权重，鼓励正常交替步态
-ENABLE_EARLY_TERMINATION = True   # 卡住时是否提前终止 episode
-STALL_THRESHOLD = 0.05      # 保持 Round 5 成功值
-MAX_STALL_STEPS = 100       # 允许连续卡住的最大步数
+# Round 7: 修正 LIFT/STRIDE 为条件奖励（只在前进时生效）
+FORWARD_WEIGHT = 2.5        # 保持
+UPRIGHT_WEIGHT = 0.5        # 保持
+STALL_PENALTY = 1.0         # 保持
+SMOOTH_WEIGHT = 0.1         # 保持
+LIFT_WEIGHT = 0.1           # 保持，但已改为条件奖励（需前进）
+STRIDE_WEIGHT = 0.05        # 保持，但已改为条件奖励（需前进）
+ENABLE_EARLY_TERMINATION = True
+STALL_THRESHOLD = 0.05      # 保持
+MAX_STALL_STEPS = 100       # 保持
 
 # 注意：render=True 会弹出 pygame 窗口显示机器人走路，但会拖慢训练速度。
 # 如果不需要观看，把下面 eval_env 的 render_mode 改回 None，render 改回 False。

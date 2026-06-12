@@ -105,22 +105,24 @@ class BipedalWalkerRewardShaping(Wrapper):
         self.last_action = np.array(action)
         
         # 5. 步态高度奖励 (新增：鼓励抬腿跨步，而不是贴地蹭行)
-        # 检测向上运动（抬腿）
+        # 检测向上运动（抬腿），但只在真正前进时生效
         lift_bonus = 0.0
-        if y_velocity > 0.05:  # 向上的速度大于阈值，说明在抬腿
-            lift_bonus = getattr(self, 'lift_weight', 0.1) * y_velocity
+        if y_velocity > 0.05 and x_velocity > 0.1:  # 抬腿 + 前进才奖励
+            lift_bonus = self.lift_weight * y_velocity
         shaped += lift_bonus
         
         # 6. 空中步态奖励 (新增：鼓励正常的交替步态)
         # 单脚离地 = 正常走路，奖励；双脚贴地 = 蹭行，不奖励
+        # 但只在真正前进时生效
         stride_bonus = 0.0
-        if leg1_contact < 0.5 and leg2_contact >= 0.5:  # 脚1离地，脚2触地
-            stride_bonus = getattr(self, 'stride_weight', 0.05)
-        elif leg1_contact >= 0.5 and leg2_contact < 0.5:  # 脚1触地，脚2离地
-            stride_bonus = getattr(self, 'stride_weight', 0.05)
-        elif leg1_contact < 0.5 and leg2_contact < 0.5:  # 双脚离地（跳跃/跨步）
-            stride_bonus = getattr(self, 'stride_weight', 0.05) * 1.5
-        # 双脚都触地（贴地蹭行）→ 不奖励
+        if x_velocity > 0.1:  # 前进才奖励步态
+            if leg1_contact < 0.5 and leg2_contact >= 0.5:  # 脚1离地，脚2触地
+                stride_bonus = self.stride_weight
+            elif leg1_contact >= 0.5 and leg2_contact < 0.5:  # 脚1触地，脚2离地
+                stride_bonus = self.stride_weight
+            elif leg1_contact < 0.5 and leg2_contact < 0.5:  # 双脚离地（跳跃/跨步）
+                stride_bonus = self.stride_weight * 1.5
+        # 双脚都触地（贴地蹭行）或后退 → 不奖励
         shaped += stride_bonus
         
         # 合并奖励
