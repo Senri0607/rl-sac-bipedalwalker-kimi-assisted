@@ -106,22 +106,23 @@ class BipedalWalkerRewardShaping(Wrapper):
         
         # 5. 步态高度奖励 (新增：鼓励抬腿跨步，而不是贴地蹭行)
         # 检测向上运动（抬腿），但只在真正前进时生效
+        # 速度挂钩：前进越快，抬腿奖励越高，避免原地蹭行
         lift_bonus = 0.0
         if y_velocity > 0.05 and x_velocity > 0.1:  # 抬腿 + 前进才奖励
-            lift_bonus = self.lift_weight * y_velocity
+            lift_bonus = self.lift_weight * y_velocity * x_velocity  # 速度挂钩
         shaped += lift_bonus
         
         # 6. 空中步态奖励 (新增：鼓励正常的交替步态)
         # 单脚离地 = 正常走路，奖励；双脚贴地 = 蹭行，不奖励
-        # 但只在真正前进时生效
+        # 速度挂钩：前进越快，步态奖励越高，避免独脚慢速蹭行
         stride_bonus = 0.0
         if x_velocity > 0.1:  # 前进才奖励步态
             if leg1_contact < 0.5 and leg2_contact >= 0.5:  # 脚1离地，脚2触地
-                stride_bonus = self.stride_weight
+                stride_bonus = self.stride_weight * x_velocity
             elif leg1_contact >= 0.5 and leg2_contact < 0.5:  # 脚1触地，脚2离地
-                stride_bonus = self.stride_weight
+                stride_bonus = self.stride_weight * x_velocity
             elif leg1_contact < 0.5 and leg2_contact < 0.5:  # 双脚离地（跳跃/跨步）
-                stride_bonus = self.stride_weight * 1.5
+                stride_bonus = self.stride_weight * x_velocity * 1.5
         # 双脚都触地（贴地蹭行）或后退 → 不奖励
         shaped += stride_bonus
         

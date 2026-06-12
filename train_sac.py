@@ -53,9 +53,9 @@ EVAL_EPISODES = 2
 
 # 多轮训练控制 (三选一)
 # -------------------------------------------------
-# Round 7: 从 Round 6 的 10万步检查点继续，修正 LIFT/STRIDE 为条件奖励
-# 奖励函数变化可以加载旧模型，因为只是环境信号变了，模型权重不变
-RESUME_FROM = "./models/round_6/sac_bipedalwalker_100000_steps.zip"
+# Round 7 修正版: 从 Round 7 的 45万步检查点继续，stride/lift 奖励改为速度挂钩
+# 消除独脚蹭行，鼓励大步快走
+RESUME_FROM = "./models/round_7/sac_bipedalwalker_final.zip"
 # -------------------------------------------------
 
 # 奖励塑形 —— 解决机器人"卡住不动"的局部最优问题
