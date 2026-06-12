@@ -35,7 +35,7 @@ RENDER_MODE = None  # 训练时不渲染，设为 "rgb_array" 可录制
 
 # 训练参数
 TOTAL_TIMESTEPS = 10_000_000  # 本轮要训练的总步数
-LEARNING_RATE = 3e-4          # Round 4: 恢复 Round 2 的学习率，验证 1e-4 是否为退化主因
+LEARNING_RATE = 3e-4          # Round 5: 保持 Round 2 的成功学习率
 BATCH_SIZE = 256
 BUFFER_SIZE = 1_000_000
 TAU = 0.005
@@ -47,7 +47,7 @@ ENT_COEF = "auto"  # 自动调整温度系数 alpha
 NET_ARCH = [256, 256]         # 保持与 Round 2 兼容，加载已有模型
 
 # 日志与保存
-ROUND_ID = 4                  # 轮次编号，每轮递增，自动创建独立目录
+ROUND_ID = 5                  # 轮次编号，每轮递增，自动创建独立目录
 CHECKPOINT_FREQ = 100_000
 EVAL_FREQ = 50_000
 EVAL_EPISODES = 2
@@ -57,7 +57,7 @@ EVAL_EPISODES = 2
 # 模式 A: 完全从头 —— 保持 None
 # 模式 B: 加载预训练当新轮次起点 —— 填上一轮模型路径
 # 模式 C: 继续训练 —— 填当前轮检查点路径
-# Round 4: 回退到 Round 2 的 50万步黄金检查点 (+527.78)
+# Round 5: 回退到 Round 2 的 50万步黄金检查点 (+527.78)
 RESUME_FROM = "./models/round_2/sac_bipedalwalker_500000_steps.zip"
 # -------------------------------------------------
 
@@ -66,13 +66,13 @@ RESUME_FROM = "./models/round_2/sac_bipedalwalker_500000_steps.zip"
 USE_REWARD_SHAPING = True
 
 # 奖励塑形参数 (仅在 USE_REWARD_SHAPING=True 时生效)
-# Round 4: 保留 Round 3 增强塑形，只改学习率做控制变量实验
-FORWARD_WEIGHT = 5.0        # 从 2.0 → 5.0，大步前进更有利可图
+# Round 5: 回退到 Round 2 温和参数，不再激进增强
+FORWARD_WEIGHT = 2.0        # ✅ 从 5.0 回退到 2.0 (Round 2 成功值)
 UPRIGHT_WEIGHT = 0.5        # 站立姿态奖励权重
-STALL_PENALTY = 3.0         # 从 1.0 → 3.0，卡住惩罚更重
+STALL_PENALTY = 1.0         # ✅ 从 3.0 回退到 1.0 (Round 2 成功值)
 SMOOTH_WEIGHT = 0.1         # 动作平滑权重
 ENABLE_EARLY_TERMINATION = True   # 卡住时是否提前终止 episode
-STALL_THRESHOLD = 0.15      # 从 0.05 → 0.15，小碎步也会被判定为卡住
+STALL_THRESHOLD = 0.05      # ✅ 从 0.15 回退到 0.05 (Round 2 成功值)
 MAX_STALL_STEPS = 100       # 允许连续卡住的最大步数
 
 # 注意：render=True 会弹出 pygame 窗口显示机器人走路，但会拖慢训练速度。
