@@ -5,6 +5,7 @@ BipedalWalker-v3 Hardcore 模型评估程序
 2. 使用matplotlib量化数据并保存
 3. 简易可视化窗口（tkinter）
 4. 评估过程录屏并保存
+5. 实时pygame显示评估动画
 
 使用方法：
     python eval_model.py
@@ -35,9 +36,72 @@ VIDEO_FPS = 30
 os.makedirs("./eval_results", exist_ok=True)
 
 
+# ------------------- pygame 实时显示窗口 -------------------
+
+class PygameViewer:
+    """用于在评估过程中实时显示 pygame 动画窗口"""
+    
+    def __init__(self, width=600, height=400, title="BipedalWalker Eval"):
+        self.width = width
+        self.height = height
+        self.title = title
+        self.screen = None
+        self.clock = None
+        self._running = False
+        self._init_pygame()
+    
+    def _init_pygame(self):
+        try:
+            import pygame
+            pygame.init()
+            self.screen = pygame.display.set_mode((self.width, self.height))
+            pygame.display.set_caption(self.title)
+            self.clock = pygame.time.Clock()
+            self._running = True
+        except ImportError:
+            print("[警告] pygame 未安装，无法显示实时窗口。请运行: pip install pygame")
+            self._running = False
+    
+    def show_frame(self, frame_rgb):
+        """显示一帧 RGB 图像到 pygame 窗口"""
+        if not self._running or self.screen is None:
+            return
+        
+        import pygame
+        
+        # 处理 pygame 事件（防止窗口卡死）
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self._running = False
+                return
+        
+        # 确保帧是 uint8 格式
+        if frame_rgb.dtype != np.uint8:
+            frame_rgb = (frame_rgb * 255).astype(np.uint8) if frame_rgb.max() <= 1.0 else frame_rgb.astype(np.uint8)
+        
+        # 调整大小适应窗口
+        if frame_rgb.shape[0] != self.height or frame_rgb.shape[1] != self.width:
+            frame_rgb = np.array(Image.fromarray(frame_rgb).resize((self.width, self.height)))
+        
+        # 转置为 pygame 格式 (width, height, 3) -> (width, height)
+        surface = pygame.surfarray.make_surface(frame_rgb.transpose(1, 0, 2))
+        self.screen.blit(surface, (0, 0))
+        pygame.display.flip()
+        
+        # 控制帧率，避免CPU占用过高
+        self.clock.tick(VIDEO_FPS)
+    
+    def close(self):
+        """关闭 pygame 窗口"""
+        if self._running and self.screen is not None:
+            import pygame
+            pygame.quit()
+            self._running = False
+
+
 # ------------------- 评估核心逻辑 -------------------
 
-def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_path, log_callback):
+def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_path, log_callback, show_pygame=True):
     """
     评估模型核心逻辑
     
@@ -48,16 +112,34 @@ def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_pa
         render_video: 是否录屏
         video_path: 视频保存路径
         log_callback: 回调函数(str) -> 更新GUI日志
+        show_pygame: 是否显示 pygame 实时窗口
     
     返回:
         results: 字典，包含 rewards, lengths, frames 等
     """
     
-    # 创建环境
+    # 创建 pygame 窗口（如果需要实时显示）
+    pygame_window = None
+    if show_pygame:
+        try:
+            pygame_window = PygameViewer(width=600, height=400, title=f"Eval: {os.path.basename(model_path)}")
+            if pygame_window._running:
+                log_callback("[✓] pygame 实时窗口已创建")
+            else:
+                log_callback("[✗] pygame 窗口创建失败，继续无窗口评估")
+                pygame_window = None
+        except Exception as e:
+            log_callback(f"[✗] pygame 初始化失败: {e}")
+            pygame_window = None
+    
+    # 创建环境 —— 始终使用 rgb_array 以便获取帧数据
+    # 然后手动用 pygame 显示
+    render_mode = "rgb_array" if (render_video or show_pygame) else None
+    
     if use_shaping:
         env = make_shaped_env(
             hardcore=True,
-            render_mode="rgb_array" if render_video else None,
+            render_mode=render_mode,
             forward_weight=2.5,
             upright_weight=0.5,
             stall_penalty=1.0,
@@ -69,7 +151,7 @@ def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_pa
             max_stall_steps=100,
         )
     else:
-        env = gym.make("BipedalWalker-v3", hardcore=True, render_mode="rgb_array" if render_video else None)
+        env = gym.make("BipedalWalker-v3", hardcore=True, render_mode=render_mode)
     
     # 加载模型
     try:
@@ -78,6 +160,8 @@ def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_pa
     except Exception as e:
         log_callback(f"[✗] 模型加载失败: {e}")
         env.close()
+        if pygame_window:
+            pygame_window.close()
         return None
     
     rewards = []
@@ -98,14 +182,17 @@ def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_pa
             episode_reward += reward
             episode_length += 1
             
-            # 录屏
-            if render_video:
-                # gymnasium 的 rgb_array 模式会在 step 返回后通过 env.render() 获取帧
-                # 但新版 gymnasium 中 render_mode="rgb_array" 时，step 不返回帧
-                # 需要调用 env.render()
+            # 获取帧（rgb_array 模式）
+            if render_mode == "rgb_array":
                 frame = env.render()
                 if frame is not None:
-                    episode_frames.append(frame)
+                    # 保存到视频
+                    if render_video:
+                        episode_frames.append(frame)
+                    
+                    # 实时显示到 pygame 窗口
+                    if pygame_window is not None:
+                        pygame_window.show_frame(frame)
             
             done = terminated or truncated
             if episode_length >= 2000:  # 安全上限
@@ -129,6 +216,10 @@ def evaluate_model(model_path, num_episodes, use_shaping, render_video, video_pa
             )
     
     env.close()
+    
+    # 关闭 pygame 窗口
+    if pygame_window is not None:
+        pygame_window.close()
     
     results = {
         "rewards": np.array(rewards),
@@ -262,7 +353,7 @@ class EvalGUI:
     def __init__(self, master):
         self.master = master
         master.title("BipedalWalker 模型评估器")
-        master.geometry("650x520")
+        master.geometry("650x560")
         master.resizable(False, False)
         
         # 变量
@@ -270,6 +361,7 @@ class EvalGUI:
         self.eval_count_var = StringVar(value=str(DEFAULT_EVAL_EPISODES))
         self.use_shaping_var = BooleanVar(value=True)
         self.render_video_var = BooleanVar(value=True)
+        self.show_pygame_var = BooleanVar(value=True)
         self.video_path_var = StringVar(value="./eval_results/eval_video.mp4")
         self.plot_path_var = StringVar(value="./eval_results")
         
@@ -297,6 +389,11 @@ class EvalGUI:
         f3 = Frame(self.master)
         f3.pack(pady=5, padx=15, fill="x")
         Checkbutton(f3, text="使用奖励塑形（与训练环境一致）", variable=self.use_shaping_var).pack(anchor="w")
+        
+        # 实时显示选项
+        f3b = Frame(self.master)
+        f3b.pack(pady=5, padx=15, fill="x")
+        Checkbutton(f3b, text="实时显示 pygame 动画窗口（评估时观看）", variable=self.show_pygame_var).pack(anchor="w")
         
         # 录屏选项
         f4 = Frame(self.master)
@@ -384,6 +481,7 @@ class EvalGUI:
         
         use_shaping = self.use_shaping_var.get()
         render_video = self.render_video_var.get()
+        show_pygame = self.show_pygame_var.get()
         video_path = self.video_path_var.get().strip()
         plot_dir = self.plot_path_var.get().strip()
         
@@ -391,18 +489,18 @@ class EvalGUI:
         self.start_btn.config(state="disabled", text="评估中...")
         self._log(f"{'='*50}")
         self._log(f"开始评估 | 模型: {os.path.basename(model_path)}")
-        self._log(f"评估次数: {num_episodes} | 塑形: {use_shaping} | 录屏: {render_video}")
+        self._log(f"评估次数: {num_episodes} | 塑形: {use_shaping} | 录屏: {render_video} | 实时显示: {show_pygame}")
         self._log(f"{'='*50}")
         
         # 在后台线程运行评估
         self.eval_thread = threading.Thread(
             target=self._eval_worker,
-            args=(model_path, num_episodes, use_shaping, render_video, video_path, plot_dir),
+            args=(model_path, num_episodes, use_shaping, render_video, show_pygame, video_path, plot_dir),
             daemon=True
         )
         self.eval_thread.start()
     
-    def _eval_worker(self, model_path, num_episodes, use_shaping, render_video, video_path, plot_dir):
+    def _eval_worker(self, model_path, num_episodes, use_shaping, render_video, show_pygame, video_path, plot_dir):
         try:
             results = evaluate_model(
                 model_path=model_path,
@@ -410,7 +508,8 @@ class EvalGUI:
                 use_shaping=use_shaping,
                 render_video=render_video,
                 video_path=video_path,
-                log_callback=self._log
+                log_callback=self._log,
+                show_pygame=show_pygame
             )
             
             if results is None:
