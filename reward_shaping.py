@@ -24,19 +24,24 @@ class BipedalWalkerRewardShaping(Wrapper):
     """
 
     def __init__(self, env, forward_weight=2.0, upright_weight=0.5,
-                 stall_penalty=1.0, smooth_weight=0.1):
+                 stall_penalty=1.0, smooth_weight=0.1,
+                 lift_weight=0.1, stride_weight=0.05):
         """
         参数:
             forward_weight: 前进速度奖励权重 (默认 2.0)
             upright_weight: 站立姿态奖励权重 (默认 0.5)
             stall_penalty: 不动惩罚强度 (默认 1.0)
             smooth_weight: 动作平滑奖励权重 (默认 0.1)
+            lift_weight: 抬腿跨步奖励权重 (默认 0.1)
+            stride_weight: 空中步态奖励权重 (默认 0.05)
         """
         super().__init__(env)
         self.forward_weight = forward_weight
         self.upright_weight = upright_weight
         self.stall_penalty = stall_penalty
         self.smooth_weight = smooth_weight
+        self.lift_weight = lift_weight
+        self.stride_weight = stride_weight
         
         # 记录上一帧动作，用于计算动作变化
         self.last_action = None
@@ -63,10 +68,18 @@ class BipedalWalkerRewardShaping(Wrapper):
         shaped = 0.0
         
         # 1. 前进速度奖励 (从 obs 中提取 torso 水平速度)
-        # obs[0] = hull angle speed (角速度)
-        # obs[1] = hull x velocity (水平速度，前进为正)
-        # obs[2] = hull y velocity (垂直速度)
-        x_velocity = obs[1] if len(obs) > 1 else 0.0
+        # Gymnasium BipedalWalker-v3 obs 空间:
+        # obs[0] = hull angle (躯干角度，0 表示垂直)
+        # obs[1] = hull angular velocity (躯干角速度)
+        # obs[2] = x velocity (水平前进速度，前进为正)  ← 正确维度
+        # obs[3] = y velocity (垂直速度，向上为正)
+        # obs[12] = leg 1 ground contact (脚1是否触地，1=触地，0=空中)
+        # obs[13] = leg 2 ground contact (脚2是否触地，1=触地，0=空中)
+        x_velocity = obs[2] if len(obs) > 2 else 0.0
+        y_velocity = obs[3] if len(obs) > 3 else 0.0
+        hull_angle = obs[0] if len(obs) > 0 else 0.0
+        leg1_contact = obs[12] if len(obs) > 12 else 1.0
+        leg2_contact = obs[13] if len(obs) > 13 else 1.0
         
         # 只有当速度为正（前进）时才给奖励，后退不给
         if x_velocity > 0:
@@ -75,9 +88,7 @@ class BipedalWalkerRewardShaping(Wrapper):
             # 后退或静止时给予轻微惩罚
             shaped += self.forward_weight * x_velocity * 0.5
         
-        # 2. 站立姿态奖励 (obs[3] = hull angle，0 表示垂直)
-        # 角度越接近 0（垂直），奖励越高
-        hull_angle = obs[3] if len(obs) > 3 else 0.0
+        # 2. 站立姿态奖励 (hull_angle 越接近 0（垂直），奖励越高)
         upright_bonus = self.upright_weight * (1.0 - abs(hull_angle))
         shaped += upright_bonus
         
@@ -93,6 +104,25 @@ class BipedalWalkerRewardShaping(Wrapper):
         
         self.last_action = np.array(action)
         
+        # 5. 步态高度奖励 (新增：鼓励抬腿跨步，而不是贴地蹭行)
+        # 检测向上运动（抬腿）
+        lift_bonus = 0.0
+        if y_velocity > 0.05:  # 向上的速度大于阈值，说明在抬腿
+            lift_bonus = getattr(self, 'lift_weight', 0.1) * y_velocity
+        shaped += lift_bonus
+        
+        # 6. 空中步态奖励 (新增：鼓励正常的交替步态)
+        # 单脚离地 = 正常走路，奖励；双脚贴地 = 蹭行，不奖励
+        stride_bonus = 0.0
+        if leg1_contact < 0.5 and leg2_contact >= 0.5:  # 脚1离地，脚2触地
+            stride_bonus = getattr(self, 'stride_weight', 0.05)
+        elif leg1_contact >= 0.5 and leg2_contact < 0.5:  # 脚1触地，脚2离地
+            stride_bonus = getattr(self, 'stride_weight', 0.05)
+        elif leg1_contact < 0.5 and leg2_contact < 0.5:  # 双脚离地（跳跃/跨步）
+            stride_bonus = getattr(self, 'stride_weight', 0.05) * 1.5
+        # 双脚都触地（贴地蹭行）→ 不奖励
+        shaped += stride_bonus
+        
         # 合并奖励
         total_reward = raw_reward + shaped
         
@@ -105,7 +135,10 @@ class BipedalWalkerRewardShaping(Wrapper):
         info["raw_reward"] = raw_reward
         info["shaped_reward"] = shaped
         info["x_velocity"] = x_velocity
+        info["y_velocity"] = y_velocity
         info["upright_bonus"] = upright_bonus
+        info["lift_bonus"] = lift_bonus
+        info["stride_bonus"] = stride_bonus
         
         # 每 100 步在 info 中打印一次累计统计（用于观察）
         if self.step_count % 100 == 0:
@@ -137,8 +170,8 @@ class EarlyTerminationWrapper(Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         
-        # 检测是否卡住
-        x_velocity = obs[1] if len(obs) > 1 else 0.0
+        # 检测是否卡住 (使用正确的 obs[2] x_velocity)
+        x_velocity = obs[2] if len(obs) > 2 else 0.0
         if abs(x_velocity) < self.stall_threshold:
             self.stall_counter += 1
         else:
@@ -153,30 +186,33 @@ class EarlyTerminationWrapper(Wrapper):
         return obs, reward, terminated, truncated, info
 
 
-def make_shaped_env(hardcore=True, render_mode=None, 
+def make_shaped_env(hardcore=True, render_mode=None,
                     forward_weight=2.0, upright_weight=0.5,
                     stall_penalty=1.0, smooth_weight=0.1,
+                    lift_weight=0.1, stride_weight=0.05,
                     enable_early_termination=True,
                     stall_threshold=0.05, max_stall_steps=100):
     """
     创建带奖励塑形的 BipedalWalker 环境。
-    
+
     参数:
         hardcore: 是否困难模式
         render_mode: 渲染模式
         forward_weight: 前进奖励权重
-        upright_weight: 站立奖励权重  
+        upright_weight: 站立奖励权重
         stall_penalty: 不动惩罚强度
         smooth_weight: 动作平滑权重
+        lift_weight: 抬腿跨步奖励权重
+        stride_weight: 空中步态奖励权重
         enable_early_termination: 是否启用提前终止
         stall_threshold: 判定为卡住的水平速度阈值
         max_stall_steps: 允许连续卡住的最大步数
-    
+
     返回:
         包装后的环境
     """
     env = gym.make("BipedalWalker-v3", hardcore=hardcore, render_mode=render_mode)
-    
+
     # 先加奖励塑形
     env = BipedalWalkerRewardShaping(
         env,
@@ -184,12 +220,14 @@ def make_shaped_env(hardcore=True, render_mode=None,
         upright_weight=upright_weight,
         stall_penalty=stall_penalty,
         smooth_weight=smooth_weight,
+        lift_weight=lift_weight,
+        stride_weight=stride_weight,
     )
-    
+
     # 再加提前终止（可选）
     if enable_early_termination:
         env = EarlyTerminationWrapper(env, stall_threshold, max_stall_steps)
-    
+
     return env
 
 
