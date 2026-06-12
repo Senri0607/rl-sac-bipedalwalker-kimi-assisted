@@ -996,6 +996,78 @@ Episode length: 1108.50 +/- 75.50
 
 ---
 
+#### Round 7 用户观察（10 次评估后）：3 个剩余问题
+
+用户通过 `eval_model.py` 连续评估 10 次后，发现速度挂钩后策略仍存在的核心问题：
+
+**问题 1: 复杂地形容易摔倒**
+> "模型在面对比较复杂的地形时（如小障碍接大障碍）容易摔倒"
+
+- 小障碍 + 大障碍的连续组合是当前策略的弱点
+- 模型在单一障碍上表现良好，但连续障碍的切换需要更精确的步态节奏
+- 原因：交替步态不够稳定，遇到连续障碍时节奏被打乱
+
+**问题 2: 平地仍单脚跳（抬腿蹭行）**
+> "模型在平地时还是会选择抬腿单脚跳"
+
+- 速度挂钩后，蹭行奖励变少，但模型发现"抬腿单脚跳"仍然能拿到 `lift_bonus`
+- 单脚跳的速度很慢（x_velocity ~0.1~0.2），但每步都有 `lift_bonus` + `stride_bonus`
+- 这是**新的奖励黑客**：用"跳"代替"走"，仍然不像人类
+
+**问题 3: 速度太慢，稳定优先于速度**
+> "模型的速度有些堪忧，他似乎会为了稳定抛弃速度"
+
+- 模型在平地速度仅 0.1~0.2，远低于人类正常行走速度（0.5~1.0）
+- 为了安全（不摔倒），模型选择极慢的速度
+- `FORWARD_WEIGHT=2.5` 对速度的激励不够强，模型宁可慢也不要摔
+
+---
+
+**解决方案**：**高权重交替步态奖励 + 速度系数**
+
+```python
+ALTERNATING_WEIGHT = 0.5  # 高权重，比 STRIDE_WEIGHT=0.05 高 10 倍
+```
+
+核心逻辑：
+- 检测**左右脚交替着地**：上一帧脚1触地→本帧脚2触地，同时脚1离地
+- 这是正常人类走路的核心特征，**只有真正交替走路时才给高奖励**
+- 单脚跳（脚1离地、脚2始终离地或始终触地）**不触发交替奖励**
+- 速度挂钩：`alternating_bonus = ALTERNATING_WEIGHT * x_velocity`
+  - 走得越快，交替奖励越高
+  - 慢速交替（0.1）→ 0.05
+  - 正常交替（0.5）→ 0.25
+  - 快速交替（1.0）→ 0.50
+
+**代码变更** (`reward_shaping.py`):
+```python
+# 7. 交替步态奖励 (高权重：鼓励左右脚交替着地)
+if x_velocity > 0.1:
+    if self.prev_leg1_contact is not None and self.prev_leg2_contact is not None:
+        leg1_lifted = (self.prev_leg1_contact >= 0.5) and (leg1_contact < 0.5)
+        leg1_touched = (self.prev_leg1_contact < 0.5) and (leg1_contact >= 0.5)
+        leg2_lifted = (self.prev_leg2_contact >= 0.5) and (leg2_contact < 0.5)
+        leg2_touched = (self.prev_leg2_contact < 0.5) and (leg2_contact >= 0.5)
+        
+        # 正常交替：一脚触地，另一脚离地，且发生切换
+        if (leg1_touched and leg2_lifted) or (leg2_touched and leg1_lifted):
+            alternating_bonus = self.alternating_weight * x_velocity
+```
+
+**加载方式**：从 Round 7 的 120 万步检查点继续
+```python
+RESUME_FROM = "./models/round_7/sac_bipedalwalker_final.zip"
+```
+
+**预期效果**：
+- 单脚跳不再高效：因为单脚跳没有"左右脚交替着地"，拿不到 `alternating_bonus`
+- 模型被迫发展出**真正的交替步态**（左脚→右脚→左脚...）
+- 为了拿到高额 `alternating_bonus`，模型会**加快速度**（因为速度挂钩）
+- 复杂地形上的交替步态更稳定，因为双脚轮流支撑，重心更平衡
+- 最终目标：**正常人类步态 + 合理速度 + 高分**
+
+---
+
 > "我想让目标看起来更像人类，毕竟我们深度学习的目的不就是为了让模型更像人类不是吗？"
 
 **问题分析**：

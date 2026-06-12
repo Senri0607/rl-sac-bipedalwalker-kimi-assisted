@@ -62,13 +62,14 @@ RESUME_FROM = "./models/round_7/sac_bipedalwalker_final.zip"
 USE_REWARD_SHAPING = True
 
 # 奖励塑形参数 (仅在 USE_REWARD_SHAPING=True 时生效)
-# Round 7: 修正 LIFT/STRIDE 为条件奖励（只在前进时生效）
+# Round 7: 修正 LIFT/STRIDE 为条件奖励（只在前进时生效），新增交替步态高奖励
 FORWARD_WEIGHT = 2.5        # 保持
 UPRIGHT_WEIGHT = 0.5        # 保持
 STALL_PENALTY = 1.0         # 保持
 SMOOTH_WEIGHT = 0.1         # 保持
 LIFT_WEIGHT = 0.1           # 保持，但已改为条件奖励（需前进）
 STRIDE_WEIGHT = 0.05        # 保持，但已改为条件奖励（需前进）
+ALTERNATING_WEIGHT = 0.5    # ⭐ 新增：高权重交替步态奖励，鼓励左右脚交替着地，速度挂钩
 ENABLE_EARLY_TERMINATION = True
 STALL_THRESHOLD = 0.05      # 保持
 MAX_STALL_STEPS = 100       # 保持
@@ -98,6 +99,7 @@ def make_env(hardcore=True, render_mode=None):
                 smooth_weight=SMOOTH_WEIGHT,
                 lift_weight=LIFT_WEIGHT,
                 stride_weight=STRIDE_WEIGHT,
+                alternating_weight=ALTERNATING_WEIGHT,
                 enable_early_termination=ENABLE_EARLY_TERMINATION,
                 stall_threshold=STALL_THRESHOLD,
                 max_stall_steps=MAX_STALL_STEPS,

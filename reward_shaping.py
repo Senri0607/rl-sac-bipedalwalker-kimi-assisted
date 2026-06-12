@@ -25,7 +25,8 @@ class BipedalWalkerRewardShaping(Wrapper):
 
     def __init__(self, env, forward_weight=2.0, upright_weight=0.5,
                  stall_penalty=1.0, smooth_weight=0.1,
-                 lift_weight=0.1, stride_weight=0.05):
+                 lift_weight=0.1, stride_weight=0.05,
+                 alternating_weight=0.5):
         """
         参数:
             forward_weight: 前进速度奖励权重 (默认 2.0)
@@ -34,6 +35,7 @@ class BipedalWalkerRewardShaping(Wrapper):
             smooth_weight: 动作平滑奖励权重 (默认 0.1)
             lift_weight: 抬腿跨步奖励权重 (默认 0.1)
             stride_weight: 空中步态奖励权重 (默认 0.05)
+            alternating_weight: 交替步态奖励权重 (默认 0.5) — 高权重，鼓励左右脚交替着地
         """
         super().__init__(env)
         self.forward_weight = forward_weight
@@ -42,9 +44,14 @@ class BipedalWalkerRewardShaping(Wrapper):
         self.smooth_weight = smooth_weight
         self.lift_weight = lift_weight
         self.stride_weight = stride_weight
+        self.alternating_weight = alternating_weight
         
         # 记录上一帧动作，用于计算动作变化
         self.last_action = None
+        
+        # 记录上一帧脚触地状态，用于检测交替步态
+        self.prev_leg1_contact = None
+        self.prev_leg2_contact = None
         
         # 记录原始奖励统计
         self.raw_reward_sum = 0.0
@@ -53,6 +60,8 @@ class BipedalWalkerRewardShaping(Wrapper):
 
     def reset(self, **kwargs):
         self.last_action = None
+        self.prev_leg1_contact = None
+        self.prev_leg2_contact = None
         self.raw_reward_sum = 0.0
         self.shaped_reward_sum = 0.0
         self.step_count = 0
@@ -123,8 +132,39 @@ class BipedalWalkerRewardShaping(Wrapper):
                 stride_bonus = self.stride_weight * x_velocity
             elif leg1_contact < 0.5 and leg2_contact < 0.5:  # 双脚离地（跳跃/跨步）
                 stride_bonus = self.stride_weight * x_velocity * 1.5
-        # 双脚都触地（贴地蹭行）或后退 → 不奖励
-        shaped += stride_bonus
+        # 7. 交替步态奖励 (高权重：鼓励左右脚交替着地，惩罚单脚蹭行/双脚同时触地)
+        # 检测交替着地模式：上一帧脚1触地→本帧脚2触地，同时脚1离地
+        # 这是正常人类走路的核心特征，给予高奖励
+        alternating_bonus = 0.0
+        if x_velocity > 0.1:  # 只在前进时奖励
+            if self.prev_leg1_contact is not None and self.prev_leg2_contact is not None:
+                # 脚1：从触地 → 离地
+                leg1_lifted = (self.prev_leg1_contact >= 0.5) and (leg1_contact < 0.5)
+                # 脚1：从离地 → 触地
+                leg1_touched = (self.prev_leg1_contact < 0.5) and (leg1_contact >= 0.5)
+                # 脚2：从触地 → 离地
+                leg2_lifted = (self.prev_leg2_contact >= 0.5) and (leg2_contact < 0.5)
+                # 脚2：从离地 → 触地
+                leg2_touched = (self.prev_leg2_contact < 0.5) and (leg2_contact >= 0.5)
+                
+                # 正常交替步态：一脚触地，另一脚离地，且发生切换
+                # 模式A：脚1刚触地，脚2刚离地（右脚→左脚支撑）
+                # 模式B：脚2刚触地，脚1刚离地（左脚→右脚支撑）
+                if (leg1_touched and leg2_lifted) or (leg2_touched and leg1_lifted):
+                    # 速度挂钩：走得越快，交替奖励越高
+                    alternating_bonus = self.alternating_weight * x_velocity
+                
+                # 惩罚双脚同时触地（蹭行）或双脚同时离地（跳跃）
+                # 但惩罚力度较小，避免过度抑制跨步
+                # elif leg1_contact >= 0.5 and leg2_contact >= 0.5:
+                #     # 双脚都触地（蹭行/站立）
+                #     alternating_bonus = -self.alternating_weight * 0.1 * x_velocity
+        
+        # 保存当前状态供下一帧使用
+        self.prev_leg1_contact = leg1_contact
+        self.prev_leg2_contact = leg2_contact
+        
+        shaped += alternating_bonus
         
         # 合并奖励
         total_reward = raw_reward + shaped
@@ -142,6 +182,9 @@ class BipedalWalkerRewardShaping(Wrapper):
         info["upright_bonus"] = upright_bonus
         info["lift_bonus"] = lift_bonus
         info["stride_bonus"] = stride_bonus
+        info["alternating_bonus"] = alternating_bonus
+        info["leg1_contact"] = leg1_contact
+        info["leg2_contact"] = leg2_contact
         
         # 每 100 步在 info 中打印一次累计统计（用于观察）
         if self.step_count % 100 == 0:
@@ -193,6 +236,7 @@ def make_shaped_env(hardcore=True, render_mode=None,
                     forward_weight=2.0, upright_weight=0.5,
                     stall_penalty=1.0, smooth_weight=0.1,
                     lift_weight=0.1, stride_weight=0.05,
+                    alternating_weight=0.5,
                     enable_early_termination=True,
                     stall_threshold=0.05, max_stall_steps=100):
     """
@@ -207,6 +251,7 @@ def make_shaped_env(hardcore=True, render_mode=None,
         smooth_weight: 动作平滑权重
         lift_weight: 抬腿跨步奖励权重
         stride_weight: 空中步态奖励权重
+        alternating_weight: 交替步态奖励权重（高权重，鼓励左右脚交替着地）
         enable_early_termination: 是否启用提前终止
         stall_threshold: 判定为卡住的水平速度阈值
         max_stall_steps: 允许连续卡住的最大步数
@@ -225,6 +270,7 @@ def make_shaped_env(hardcore=True, render_mode=None,
         smooth_weight=smooth_weight,
         lift_weight=lift_weight,
         stride_weight=stride_weight,
+        alternating_weight=alternating_weight,
     )
 
     # 再加提前终止（可选）
