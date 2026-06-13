@@ -46,36 +46,38 @@ ENT_COEF = "auto"  # 自动调整温度系数 alpha
 NET_ARCH = [256, 256]         # 保持与 Round 6 兼容
 
 # 日志与保存
-ROUND_ID = 7                  # 轮次编号，每轮递增，自动创建独立目录
+ROUND_ID = 9                  # 轮次编号，每轮递增，自动创建独立目录
 CHECKPOINT_FREQ = 100_000
 EVAL_FREQ = 50_000
 EVAL_EPISODES = 2
 
 # 多轮训练控制 (三选一)
 # -------------------------------------------------
-# Round 7 修正版: 从 Round 7 的 45万步检查点继续，stride/lift 奖励改为速度挂钩
-# 消除独脚蹭行，鼓励大步快走
-RESUME_FROM = "./models/round_7/sac_bipedalwalker_final.zip"
+# Round 9: 最终作业提交模型训练
+# 从 Round 8 的 115万步检查点继续，关闭评估渲染，持续优化交替步态
+RESUME_FROM = "./models/round_8/sac_bipedalwalker_final.zip"
 # -------------------------------------------------
 
 # 奖励塑形 —— 解决机器人"卡住不动"的局部最优问题
 USE_REWARD_SHAPING = True
 
 # 奖励塑形参数 (仅在 USE_REWARD_SHAPING=True 时生效)
-# Round 7: 修正 LIFT/STRIDE 为条件奖励（只在前进时生效），新增交替步态高奖励
+# Round 9: 最终作业提交模型，延续 Round 8 配置，继续优化交替步态
 FORWARD_WEIGHT = 2.5        # 保持
 UPRIGHT_WEIGHT = 0.5        # 保持
 STALL_PENALTY = 1.0         # 保持
 SMOOTH_WEIGHT = 0.1         # 保持
 LIFT_WEIGHT = 0.1           # 保持，但已改为条件奖励（需前进）
 STRIDE_WEIGHT = 0.05        # 保持，但已改为条件奖励（需前进）
-ALTERNATING_WEIGHT = 0.5    # ⭐ 新增：高权重交替步态奖励，鼓励左右脚交替着地，速度挂钩
+ALTERNATING_WEIGHT = 0.5    # ⭐ 延续：高权重交替步态奖励，鼓励左右脚交替着地，速度挂钩
 ENABLE_EARLY_TERMINATION = True
 STALL_THRESHOLD = 0.05      # 保持
 MAX_STALL_STEPS = 100       # 保持
 
 # 注意：render=True 会弹出 pygame 窗口显示机器人走路，但会拖慢训练速度。
 # 如果不需要观看，把下面 eval_env 的 render_mode 改回 None，render 改回 False。
+# ⚠️ Round 8 起：已默认关闭渲染，避免 pygame 窗口崩溃导致训练中断。
+# 如需观察步态，使用 eval_model.py 单独评估。
 
 # 设备配置：默认使用 GPU
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -360,8 +362,8 @@ def main():
     print("\n[1/4] 创建训练环境...")
     train_env = DummyVecEnv([make_env(hardcore=HARDCORE, render_mode=RENDER_MODE)])
 
-    # 创建评估环境（启用可视化渲染）
-    eval_env = DummyVecEnv([make_env(hardcore=HARDCORE, render_mode="human")])
+# 创建评估环境（关闭可视化渲染，避免 pygame 窗口崩溃导致训练中断）
+    eval_env = DummyVecEnv([make_env(hardcore=HARDCORE, render_mode=None)])
 
     # 创建或加载 SAC 模型
     print("[2/4] 初始化 SAC 模型...")
@@ -393,6 +395,9 @@ def main():
         upright_weight=UPRIGHT_WEIGHT,
         stall_penalty=STALL_PENALTY,
         smooth_weight=SMOOTH_WEIGHT,
+        lift_weight=LIFT_WEIGHT,
+        stride_weight=STRIDE_WEIGHT,
+        alternating_weight=ALTERNATING_WEIGHT,
         enable_early_termination=ENABLE_EARLY_TERMINATION,
         stall_threshold=STALL_THRESHOLD,
         max_stall_steps=MAX_STALL_STEPS,
@@ -417,7 +422,7 @@ def main():
         log_path=LOG_DIR,
         eval_freq=EVAL_FREQ,
         deterministic=True,
-        render=True,
+        render=False,  # 关闭渲染，避免 pygame 窗口崩溃
         n_eval_episodes=EVAL_EPISODES,
     )
 
